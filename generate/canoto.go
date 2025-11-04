@@ -125,6 +125,7 @@ var (
 func writeStruct(w io.Writer, m message, canotoSelector string) error {
 	const structTemplate = `
 const (
+${numberConstants}
 ${tagConstants})
 
 type canotoData_${structName} struct {
@@ -289,6 +290,7 @@ ${marshal}	return w
 	return writeTemplate(w, structTemplate, map[string]string{
 		"typesDecl":           typesDecl,
 		"appendTypes":         appendTypes,
+		"numberConstants":     makeNumberConstants(m),
 		"tagConstants":        makeTagConstants(m),
 		"structName":          m.name,
 		"generics":            generics,
@@ -354,6 +356,27 @@ func makeGenerics(m message) string {
 	return s.String()
 }
 
+func makeNumberConstants(m message) string {
+	const fieldSizeOverhead = len("canoto____")
+	var largestNumberConstSize int
+	for _, f := range m.fields {
+		numberConstSize := fieldSizeOverhead + len(m.canonicalizedName) + len(f.canonicalizedName)
+		largestNumberConstSize = max(largestNumberConstSize, numberConstSize)
+	}
+
+	var (
+		template = fmt.Sprintf("\t%%-%ds = %%d\n",
+			largestNumberConstSize,
+		)
+		s strings.Builder
+	)
+	for _, f := range m.fields {
+		field := fmt.Sprintf("canoto__%s__%s", m.canonicalizedName, f.canonicalizedName)
+		_, _ = fmt.Fprintf(&s, template, field, f.fieldNumber)
+	}
+	return s.String()
+}
+
 func makeTagConstants(m message) string {
 	const tagSizeOverhead = len("canoto______tag")
 	var (
@@ -371,14 +394,15 @@ func makeTagConstants(m message) string {
 	}
 
 	var (
-		template = fmt.Sprintf("\t%%-%ds = %%-%ds // canoto.Tag(%%d, canoto.%%s)\n",
+		template = fmt.Sprintf("\t%%-%ds = %%-%ds // canoto.Tag(%%s, canoto.%%s)\n",
 			largestTagConstSize,
 			largestTagSize,
 		)
 		s strings.Builder
 	)
 	for _, f := range m.fields {
-		tag := fmt.Sprintf("canoto__%s__%s__tag", m.canonicalizedName, f.canonicalizedName)
+		field := fmt.Sprintf("canoto__%s__%s", m.canonicalizedName, f.canonicalizedName)
+		tag := field + "__tag"
 
 		var tagString strings.Builder
 		_, _ = tagString.WriteString(`"`)
@@ -390,7 +414,7 @@ func makeTagConstants(m message) string {
 		}
 		_, _ = tagString.WriteString(`"`)
 
-		_, _ = fmt.Fprintf(&s, template, tag, &tagString, f.fieldNumber, wireType)
+		_, _ = fmt.Fprintf(&s, template, tag, &tagString, field, wireType)
 	}
 	return s.String()
 }
@@ -461,14 +485,14 @@ func makeSpec(m message) string {
 	return writeMessage(m, messageTemplate{
 		ints: typeTemplate{
 			single: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				OneOf:       "${oneOf}",
 				Type${suffix}:${signedSpace}    ${selector}SizeOf(zero.${fieldName}),
 			},
 `,
 			repeated: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				Repeated:    true,
 				OneOf:       "${oneOf}",
@@ -476,7 +500,7 @@ func makeSpec(m message) string {
 			},
 `,
 			fixedRepeated: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				FixedLength: uint64(len(zero.${fieldName})),
 				Repeated:    true,
@@ -488,7 +512,7 @@ func makeSpec(m message) string {
 		fints: typeTemplate{
 			single: `			${selector}FieldTypeFromFint(
 				/*type inference:*/ zero.${fieldName},
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ 0,
 				/*Repeated:      */ false,
@@ -497,7 +521,7 @@ func makeSpec(m message) string {
 `,
 			repeated: `			${selector}FieldTypeFromFint(
 				/*type inference:*/ ${selector}MakeEntry(zero.${fieldName}),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ 0,
 				/*Repeated:      */ true,
@@ -506,7 +530,7 @@ func makeSpec(m message) string {
 `,
 			fixedRepeated: `			${selector}FieldTypeFromFint(
 				/*type inference:*/ ${selector}MakeEntry(zero.${fieldName}[:]),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ uint64(len(zero.${fieldName})),
 				/*Repeated:      */ true,
@@ -516,14 +540,14 @@ func makeSpec(m message) string {
 		},
 		bools: typeTemplate{
 			single: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				OneOf:       "${oneOf}",
 				TypeBool:    true,
 			},
 `,
 			repeated: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				Repeated:    true,
 				OneOf:       "${oneOf}",
@@ -531,7 +555,7 @@ func makeSpec(m message) string {
 			},
 `,
 			fixedRepeated: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				FixedLength: uint64(len(zero.${fieldName})),
 				Repeated:    true,
@@ -542,14 +566,14 @@ func makeSpec(m message) string {
 		},
 		strings: typeTemplate{
 			single: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				OneOf:       "${oneOf}",
 				TypeString:  true,
 			},
 `,
 			repeated: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				Repeated:    true,
 				OneOf:       "${oneOf}",
@@ -557,7 +581,7 @@ func makeSpec(m message) string {
 			},
 `,
 			fixedRepeated: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				FixedLength: uint64(len(zero.${fieldName})),
 				Repeated:    true,
@@ -567,14 +591,14 @@ func makeSpec(m message) string {
 `,
 		},
 		bytesTemplate: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				OneOf:       "${oneOf}",
 				TypeBytes:   true,
 			},
 `,
 		repeatedBytesTemplate: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				Repeated:    true,
 				OneOf:       "${oneOf}",
@@ -582,14 +606,14 @@ func makeSpec(m message) string {
 			},
 `,
 		fixedBytesTemplate: `			{
-				FieldNumber:    ${fieldNumber},
+				FieldNumber:    ${fieldNumberConst},
 				Name:           "${fieldName}",
 				OneOf:          "${oneOf}",
 				TypeFixedBytes: uint64(len(zero.${fieldName})),
 			},
 `,
 		repeatedFixedBytesTemplate: `			{
-				FieldNumber:    ${fieldNumber},
+				FieldNumber:    ${fieldNumberConst},
 				Name:           "${fieldName}",
 				Repeated:       true,
 				OneOf:          "${oneOf}",
@@ -597,7 +621,7 @@ func makeSpec(m message) string {
 			},
 `,
 		fixedRepeatedBytesTemplate: `			{
-				FieldNumber: ${fieldNumber},
+				FieldNumber: ${fieldNumberConst},
 				Name:        "${fieldName}",
 				FixedLength: uint64(len(zero.${fieldName})),
 				Repeated:    true,
@@ -606,7 +630,7 @@ func makeSpec(m message) string {
 			},
 `,
 		fixedRepeatedFixedBytesTemplate: `			{
-				FieldNumber:    ${fieldNumber},
+				FieldNumber:    ${fieldNumberConst},
 				Name:           "${fieldName}",
 				FixedLength:    uint64(len(zero.${fieldName})),
 				Repeated:       true,
@@ -617,7 +641,7 @@ func makeSpec(m message) string {
 		values: typeTemplate{
 			single: `			${selector}FieldTypeFromField(
 				/*type inference:*/ ${genericTypeCast}(&zero.${fieldName}),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ 0,
 				/*Repeated:      */ false,
@@ -627,7 +651,7 @@ func makeSpec(m message) string {
 `,
 			repeated: `			${selector}FieldTypeFromField(
 				/*type inference:*/ ${genericTypeCast}(${selector}MakeEntryNilPointer(zero.${fieldName})),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ 0,
 				/*Repeated:      */ true,
@@ -637,7 +661,7 @@ func makeSpec(m message) string {
 `,
 			fixedRepeated: `			${selector}FieldTypeFromField(
 				/*type inference:*/ ${genericTypeCast}(${selector}MakeEntryNilPointer(zero.${fieldName}[:])),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ uint64(len(zero.${fieldName})),
 				/*Repeated:      */ true,
@@ -649,7 +673,7 @@ func makeSpec(m message) string {
 		pointers: typeTemplate{
 			single: `			${selector}FieldTypeFromField(
 				/*type inference:*/ ${genericTypeCast}(zero.${fieldName}),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ 0,
 				/*Repeated:      */ false,
@@ -659,7 +683,7 @@ func makeSpec(m message) string {
 `,
 			repeated: `			${selector}FieldTypeFromField(
 				/*type inference:*/ ${genericTypeCast}(${selector}MakeEntry(zero.${fieldName})),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ 0,
 				/*Repeated:      */ true,
@@ -669,7 +693,7 @@ func makeSpec(m message) string {
 `,
 			fixedRepeated: `			${selector}FieldTypeFromField(
 				/*type inference:*/ ${genericTypeCast}(${selector}MakeEntry(zero.${fieldName}[:])),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ uint64(len(zero.${fieldName})),
 				/*Repeated:      */ true,
@@ -681,7 +705,7 @@ func makeSpec(m message) string {
 		fields: typeTemplate{
 			single: `			${selector}FieldTypeFromField(
 				/*type inference:*/ zero.${fieldName},
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ 0,
 				/*Repeated:      */ false,
@@ -691,7 +715,7 @@ func makeSpec(m message) string {
 `,
 			repeated: `			${selector}FieldTypeFromField(
 				/*type inference:*/ ${selector}MakeEntry(zero.${fieldName}),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ 0,
 				/*Repeated:      */ true,
@@ -702,7 +726,7 @@ func makeSpec(m message) string {
 
 			fixedRepeated: `			${selector}FieldTypeFromField(
 				/*type inference:*/ ${selector}MakeEntry(zero.${fieldName}[:]),
-				/*FieldNumber:   */ ${fieldNumber},
+				/*FieldNumber:   */ ${fieldNumberConst},
 				/*Name:          */ "${fieldName}",
 				/*FixedLength:   */ uint64(len(zero.${fieldName})),
 				/*Repeated:      */ true,
@@ -716,7 +740,7 @@ func makeSpec(m message) string {
 
 func makeUnmarshal(m message) string {
 	const (
-		intTemplate = `		case ${fieldNumber}:
+		intTemplate = `		case ${fieldNumberConst}:
 			if wireType != ${selector}${wireType} {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -728,7 +752,7 @@ func makeUnmarshal(m message) string {
 				return ${selector}ErrZeroValue
 			}
 `
-		repeatedFixedSizeTemplate = `		case ${fieldNumber}:
+		repeatedFixedSizeTemplate = `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -763,7 +787,7 @@ func makeUnmarshal(m message) string {
 			}
 			r.B = remainingBytes
 `
-		fixedRepeatedFixedSizeTemplate = `		case ${fieldNumber}:
+		fixedRepeatedFixedSizeTemplate = `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -793,7 +817,7 @@ func makeUnmarshal(m message) string {
 			}
 			r.B = remainingBytes
 `
-		bytesTemplate = `		case ${fieldNumber}:
+		bytesTemplate = `		case ${fieldNumberConst}:
 			if wireType != ${selector}${wireType} {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -805,7 +829,7 @@ func makeUnmarshal(m message) string {
 				return ${selector}ErrZeroValue
 			}
 `
-		repeatedBytesTemplate = `		case ${fieldNumber}:
+		repeatedBytesTemplate = `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -843,7 +867,7 @@ func makeUnmarshal(m message) string {
 				}
 			}
 `
-		fixedRepeatedBytes = `		case ${fieldNumber}:
+		fixedRepeatedBytes = `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -878,7 +902,7 @@ func makeUnmarshal(m message) string {
 	return writeMessage(m, messageTemplate{
 		ints: typeTemplate{
 			single: intTemplate,
-			repeated: `		case ${fieldNumber}:
+			repeated: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -911,7 +935,7 @@ func makeUnmarshal(m message) string {
 			r.B = remainingBytes
 			${storePrefix}c.canotoData.${fieldName}Size${storeJoin}uint64(len(msgBytes))${storeSuffix}
 `,
-			fixedRepeated: `		case ${fieldNumber}:
+			fixedRepeated: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -960,7 +984,7 @@ func makeUnmarshal(m message) string {
 		},
 		bytesTemplate:         bytesTemplate,
 		repeatedBytesTemplate: repeatedBytesTemplate,
-		fixedBytesTemplate: `		case ${fieldNumber}:
+		fixedBytesTemplate: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -986,7 +1010,7 @@ func makeUnmarshal(m message) string {
 			}
 			r.B = r.B[expectedLength:]
 `,
-		repeatedFixedBytesTemplate: `		case ${fieldNumber}:
+		repeatedFixedBytesTemplate: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1042,7 +1066,7 @@ func makeUnmarshal(m message) string {
 			}
 `,
 		fixedRepeatedBytesTemplate: fixedRepeatedBytes,
-		fixedRepeatedFixedBytesTemplate: `		case ${fieldNumber}:
+		fixedRepeatedFixedBytesTemplate: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1098,7 +1122,7 @@ func makeUnmarshal(m message) string {
 			}
 `,
 		values: typeTemplate{
-			single: `		case ${fieldNumber}:
+			single: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1123,7 +1147,7 @@ func makeUnmarshal(m message) string {
 			}
 			r.B = remainingBytes
 `,
-			repeated: `		case ${fieldNumber}:
+			repeated: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1176,7 +1200,7 @@ func makeUnmarshal(m message) string {
 				r.B = remainingBytes
 			}
 `,
-			fixedRepeated: `		case ${fieldNumber}:
+			fixedRepeated: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1234,7 +1258,7 @@ func makeUnmarshal(m message) string {
 `,
 		},
 		pointers: typeTemplate{
-			single: `		case ${fieldNumber}:
+			single: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1260,7 +1284,7 @@ func makeUnmarshal(m message) string {
 			}
 			r.B = remainingBytes
 `,
-			repeated: `		case ${fieldNumber}:
+			repeated: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1315,7 +1339,7 @@ func makeUnmarshal(m message) string {
 				r.B = remainingBytes
 			}
 `,
-			fixedRepeated: `		case ${fieldNumber}:
+			fixedRepeated: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1375,7 +1399,7 @@ func makeUnmarshal(m message) string {
 `,
 		},
 		fields: typeTemplate{
-			single: `		case ${fieldNumber}:
+			single: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1401,7 +1425,7 @@ func makeUnmarshal(m message) string {
 			}
 			r.B = remainingBytes
 `,
-			repeated: `		case ${fieldNumber}:
+			repeated: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1456,7 +1480,7 @@ func makeUnmarshal(m message) string {
 				r.B = remainingBytes
 			}
 `,
-			fixedRepeated: `		case ${fieldNumber}:
+			fixedRepeated: `		case ${fieldNumberConst}:
 			if wireType != ${selector}Len {
 				return ${selector}ErrUnexpectedWireType
 			}${unmarshalOneOf}
@@ -1533,14 +1557,14 @@ func makeValidOneOf(m message) string {
 		if ${oneOf}OneOf != 0 {
 			return false
 		}
-		${oneOf}OneOf = ${fieldNumber}
+		${oneOf}OneOf = ${fieldNumberConst}
 	}
 `
 		repeatedTemplate = `	if len(c.${fieldName}) != 0 {
 		if ${oneOf}OneOf != 0 {
 			return false
 		}
-		${oneOf}OneOf = ${fieldNumber}
+		${oneOf}OneOf = ${fieldNumberConst}
 	}
 `
 	)
@@ -1572,7 +1596,7 @@ func makeValidOneOf(m message) string {
 			if ${oneOf}OneOf != 0 {
 				return false
 			}
-			${oneOf}OneOf = ${fieldNumber}
+			${oneOf}OneOf = ${fieldNumberConst}
 		}
 	}
 `,
@@ -1583,7 +1607,7 @@ func makeValidOneOf(m message) string {
 		if ${oneOf}OneOf != 0 {
 			return false
 		}
-		${oneOf}OneOf = ${fieldNumber}
+		${oneOf}OneOf = ${fieldNumberConst}
 	}
 `,
 				repeated: repeatedTemplate,
@@ -1600,7 +1624,7 @@ func makeValidOneOf(m message) string {
 			if ${oneOf}OneOf != 0 {
 				return false
 			}
-			${oneOf}OneOf = ${fieldNumber}
+			${oneOf}OneOf = ${fieldNumberConst}
 		}
 	}
 `,
@@ -1612,7 +1636,7 @@ func makeValidOneOf(m message) string {
 			if ${oneOf}OneOf != 0 {
 				return false
 			}
-			${oneOf}OneOf = ${fieldNumber}
+			${oneOf}OneOf = ${fieldNumberConst}
 		}
 	}
 `,
@@ -1634,7 +1658,7 @@ func makeValidOneOf(m message) string {
 			if ${oneOf}OneOf != 0 {
 				return false
 			}
-			${oneOf}OneOf = ${fieldNumber}
+			${oneOf}OneOf = ${fieldNumberConst}
 		}
 	}
 `,
@@ -1645,7 +1669,7 @@ func makeValidOneOf(m message) string {
 		if ${oneOf}OneOf != 0 {
 			return false
 		}
-		${oneOf}OneOf = ${fieldNumber}
+		${oneOf}OneOf = ${fieldNumberConst}
 	}
 `,
 				repeated: repeatedTemplate,
@@ -1663,7 +1687,7 @@ func makeValidOneOf(m message) string {
 			if ${oneOf}OneOf != 0 {
 				return false
 			}
-			${oneOf}OneOf = ${fieldNumber}
+			${oneOf}OneOf = ${fieldNumberConst}
 		}
 	}
 `,
@@ -2367,7 +2391,7 @@ func makeMarshal(m message) string {
 		} else {
 			fmt.Fprintf(&s, "\tswitch %s {\n", varName)
 			for _, field := range currentOneOfFields {
-				_, _ = fmt.Fprintf(&s, "\tcase %d:\n", field.fieldNumber)
+				_, _ = fmt.Fprintf(&s, "\tcase canoto__%s__%s:\n", m.canonicalizedName, field.canonicalizedName)
 				_ = writeField(&s, field, oneOfTmpl)
 			}
 		}
